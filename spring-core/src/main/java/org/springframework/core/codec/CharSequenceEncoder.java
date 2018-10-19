@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,8 @@ import reactor.core.publisher.Flux;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
+import org.springframework.core.log.LogFormatUtils;
+import org.springframework.lang.Nullable;
 import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
 
@@ -40,8 +42,11 @@ import org.springframework.util.MimeTypeUtils;
  * @since 5.0
  * @see StringDecoder
  */
-public class CharSequenceEncoder extends AbstractEncoder<CharSequence> {
+public final class CharSequenceEncoder extends AbstractEncoder<CharSequence> {
 
+	/**
+	 * The default charset used by the encoder.
+	 */
 	public static final Charset DEFAULT_CHARSET = StandardCharsets.UTF_8;
 
 
@@ -51,28 +56,40 @@ public class CharSequenceEncoder extends AbstractEncoder<CharSequence> {
 
 
 	@Override
-	public boolean canEncode(ResolvableType elementType, MimeType mimeType) {
-		Class<?> clazz = elementType.resolve(Object.class);
+	public boolean canEncode(ResolvableType elementType, @Nullable MimeType mimeType) {
+		Class<?> clazz = elementType.toClass();
 		return super.canEncode(elementType, mimeType) && CharSequence.class.isAssignableFrom(clazz);
 	}
 
 	@Override
 	public Flux<DataBuffer> encode(Publisher<? extends CharSequence> inputStream,
 			DataBufferFactory bufferFactory, ResolvableType elementType,
-			MimeType mimeType, Map<String, Object> hints) {
+			@Nullable MimeType mimeType, @Nullable Map<String, Object> hints) {
 
+		Charset charset = getCharset(mimeType);
+
+		return Flux.from(inputStream).map(charSequence -> {
+			if (!Hints.isLoggingSuppressed(hints)) {
+				LogFormatUtils.traceDebug(logger, traceOn -> {
+					String formatted = LogFormatUtils.formatValue(charSequence, !traceOn);
+					return Hints.getLogPrefix(hints) + "Writing " + formatted;
+				});
+			}
+			CharBuffer charBuffer = CharBuffer.wrap(charSequence);
+			ByteBuffer byteBuffer = charset.encode(charBuffer);
+			return bufferFactory.wrap(byteBuffer);
+		});
+	}
+
+	private Charset getCharset(@Nullable MimeType mimeType) {
 		Charset charset;
 		if (mimeType != null && mimeType.getCharset() != null) {
 			charset = mimeType.getCharset();
 		}
 		else {
-			 charset = DEFAULT_CHARSET;
+			charset = DEFAULT_CHARSET;
 		}
-		return Flux.from(inputStream).map(charSequence -> {
-			CharBuffer charBuffer = CharBuffer.wrap(charSequence);
-			ByteBuffer byteBuffer = charset.encode(charBuffer);
-			return bufferFactory.wrap(byteBuffer);
-		});
+		return charset;
 	}
 
 
